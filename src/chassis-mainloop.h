@@ -21,20 +21,20 @@
 #ifndef _CHASSIS_MAINLOOP_H_
 #define _CHASSIS_MAINLOOP_H_
 
-#include <glib.h>    /* GPtrArray */
+#include <glib.h>               /* GPtrArray */
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
 #ifdef HAVE_SYS_TIME_H
-#include <sys/time.h>  /* event.h needs struct tm */
+#include <sys/time.h>           /* event.h needs struct tm */
 #endif
 #ifdef HAVE_SYS_TYPES_H
 #include <sys/types.h>
 #endif
 #include <stdio.h>
-#include <event.h>     /* struct event_base */
+#include <event.h>              /* struct event_base */
 
 #include "chassis-exports.h"
 #include "chassis-log.h"
@@ -54,20 +54,14 @@ typedef struct chassis chassis;
 #define MAX_SERVER_NUM 64
 #define MAX_QUERY_TIME 1000
 #define MAX_WAIT_TIME 1024
+#define MAX_TRY_NUM 6
+#define MAX_CREATE_CONN_NUM 512
 #define MAX_DIST_TRAN_PREFIX 32
+#define DEFAULT_LIVE_TIME 7200
 
 #define MAX_ALLOWED_PACKET_CEIL    (1 * GB)
 #define MAX_ALLOWED_PACKET_DEFAULT (32 * MB)
 #define MAX_ALLOWED_PACKET_FLOOR   (1 * KB)
-
-typedef struct cached_sql_info_t {
-    time_t     last_visit_time;
-    int        visited_cnt;
-    int        parsed_txLevel;
-    int        parsed_rv;
-    int        parsed_join_op_unsupported;
-    GPtrArray *groups;
-} cached_sql_info_t;
 
 typedef struct rw_op_t {
     uint64_t ro;
@@ -79,7 +73,7 @@ typedef struct query_stats_t {
     rw_op_t proxyed_query;
     uint64_t query_time_table[MAX_QUERY_TIME];
     uint64_t query_wait_table[MAX_WAIT_TIME];
-    rw_op_t  server_query_details[MAX_SERVER_NUM];
+    rw_op_t server_query_details[MAX_SERVER_NUM];
     uint64_t com_select;
     uint64_t com_insert;
     uint64_t com_update;
@@ -96,10 +90,10 @@ typedef struct query_stats_t {
 /* For generating unique global ids for MySQL */
 struct incremental_guid_state_t {
     unsigned int last_sec;
-    int   worker_id;
-    int   rand_id;
-    int   init_rand_id;
-    int   seq_id;
+    int worker_id;
+    int rand_id;
+    int init_rand_id;
+    int seq_id;
 };
 
 void incremental_guid_init(struct incremental_guid_state_t *s);
@@ -131,19 +125,21 @@ struct chassis {
     unsigned int maintain_close_mode;
     unsigned int config_remote;
     unsigned int disable_threads;
+    int ssl;
     unsigned int is_tcp_stream_enabled;
     unsigned int query_cache_enabled;
     unsigned int is_back_compressed;
     unsigned int compress_support;
     unsigned int client_found_rows;
     unsigned int master_preferred;
+    unsigned int is_manual_down;
     unsigned int is_reduce_conns;
     unsigned int xa_log_detailed;
-    unsigned int is_reset_conn_enabled;
     unsigned int sharding_reload;
     unsigned int check_slave_delay;
     int complement_conn_cnt;
     int default_query_cache_timeout;
+    int client_idle_timeout;
     double slave_delay_down_threshold_sec;
     double slave_delay_recover_threshold_sec;
     unsigned int long_query_time;
@@ -151,10 +147,12 @@ struct chassis {
     int cetus_max_allowed_packet;
     int disable_dns_cache;
 
+    int max_alive_time;
     int max_resp_len;
     int merged_output_size;
     int max_header_size;
     int compressed_merged_output_size;
+    int is_need_to_create_conns;
 
     /* Conn-pool initialize settings */
     int max_idle_connections;
@@ -165,9 +163,9 @@ struct chassis {
     char dist_tran_prefix[MAX_DIST_TRAN_PREFIX];
 
     chassis_private *priv;
-    void (*priv_shutdown)(chassis *chas, chassis_private *priv);
-    void (*priv_finally_free_shared)(chassis *chas, chassis_private *priv);
-    void (*priv_free)(chassis *chas, chassis_private *priv);
+    void (*priv_shutdown) (chassis *chas, chassis_private *priv);
+    void (*priv_finally_free_shared) (chassis *chas, chassis_private *priv);
+    void (*priv_free) (chassis *chas, chassis_private *priv);
 
     chassis_log *log;
 
@@ -177,12 +175,28 @@ struct chassis {
 
     struct incremental_guid_state_t guid_state;
     time_t startup_time;
+    time_t current_time;
     struct chassis_options_t *options;
     chassis_config_t *config_manager;
     GHashTable *query_cache_table;
     GQueue *cache_index;
     unsigned long long last_cache_purge_time;
     gboolean allow_new_conns;
+
+    gint verbose_shutdown;
+    gint daemon_mode;
+    gchar *pid_file;
+    gchar *log_level;
+    gchar **plugin_names;
+    gchar *log_xa_filename;
+    guint invoke_dbg_on_crash;
+    guint auto_restart;
+    gint max_files_number;
+    char *remote_config_url;
+    gchar *default_file;
+    gint print_version;
+
+    gint group_replication_mode;
 };
 
 CHASSIS_API chassis *chassis_new(void);

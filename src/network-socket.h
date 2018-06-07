@@ -55,45 +55,41 @@
 typedef enum {
     NETWORK_SOCKET_SUCCESS,
     NETWORK_SOCKET_WAIT_FOR_EVENT,
+    NETWORK_SOCKET_WAIT_FOR_WRITABLE,
     NETWORK_SOCKET_ERROR,
     NETWORK_SOCKET_ERROR_RETRY
 } network_socket_retval_t;
 
+#define MAX_QUERY_CACHE_SIZE 65536
+
 typedef struct network_mysqld_auth_challenge network_mysqld_auth_challenge;
 typedef struct network_mysqld_auth_response network_mysqld_auth_response;
 
-typedef struct server_state_data
-{
+typedef struct server_state_data {
     guint32 len;
     int command;
 
     int qs_state;
 
-
-    union 
-    {
-        struct 
-        {
+    union {
+        struct {
             int want_eofs;
             int first_packet;
         } prepare;
 
         int query_type;
 
-        struct 
-        {
-            char state; 
+        struct {
+            char state;
         } auth_result;
 
-        struct 
-        {
+        struct {
             GString *db_name;
         } init_db;
     } state;
 } server_state_data;
 
-typedef struct
-{   
+typedef struct {
     int server_status;
     int warning_count;
     guint64 affected_rows;
@@ -104,51 +100,59 @@ typedef struct
     int query_status;
 } server_query_status;
 
+typedef struct network_ssl_connection_s network_ssl_connection_t;
+
 typedef struct {
+    int socket_type; /**< SOCK_STREAM or SOCK_DGRAM for now */
     int fd;             /**< socket-fd */
-    guint32 last_visit_time;
+    guint32 create_time;
+    guint32 update_time;
+
     struct event event; /**< events for this fd */
 
     network_address *src; /**< getsockname() */
     network_address *dst; /**< getpeername() */
 
-    int socket_type; /**< SOCK_STREAM or SOCK_DGRAM for now */
-
 
     /**< internal tracking of the packet_id's the automaticly set the next good packet-id */
-    guint8   last_packet_id; 
-    guint8   compressed_packet_id; 
+    guint8 last_packet_id;
+    guint8 compressed_packet_id;
 
     /**< internal tracking of the packet_id sequencing */
-    gboolean packet_id_is_reset; 
+    gboolean packet_id_is_reset;
 
     network_queue *recv_queue;
     network_queue *recv_queue_raw;
     network_queue *recv_queue_uncompress_raw;
+    network_queue *recv_queue_decrypted_raw;
+
     network_queue *send_queue;
+    network_queue *send_queue_compressed;
     network_queue *cache_queue;
+
     GString *last_compressed_packet;
     int compressed_unsend_offset;
+    int total_output;
 
     off_t to_read;
     off_t resp_len;
-    int total_output;
 
     /**
      * data extracted from the handshake  
      */
     network_mysqld_auth_challenge *challenge;
-    network_mysqld_auth_response  *response;
+    network_mysqld_auth_response *response;
 
     unsigned int is_authed:1;           /** did a client already authed this connection */
     unsigned int is_server_conn_reserved:1;
 
     /* if not in a trx, use a "short timeout" to trigger (proxy_timeout),
-     so that server conns will be returned to pool immediately  */
+       so that server conns will be returned to pool immediately  */
     unsigned int is_need_q_peek_exec:1;
     unsigned int is_multi_stmt_set:1;
     unsigned int is_closed:1;
     unsigned int unavailable:1;
+    unsigned int is_reset_conn_supported:1;
     unsigned int is_in_sess_context:1;
     unsigned int is_in_tran_context:1;
     unsigned int is_robbed:1;
@@ -161,29 +165,30 @@ typedef struct {
     unsigned int do_strict_compress:1;
     unsigned int do_query_cache:1;
 
-    guint8    charset_code;
+    guint8 charset_code;
 
     /**
      * store the default-db of the socket
      *
      * the client might have a different default-db than the server-side due to
      * statement balancing
-     */	
+     */
     GString *default_db;     /** default-db of this side of the connection */
     /* only used for server */
-    GString *username;    
-    GString *group;    
+    GString *username;
+    GString *group;
 
     GString *charset;
     GString *charset_client;
     GString *charset_connection;
     GString *charset_results;
     GString *sql_mode;
-    server_state_data    parse;
-    server_query_status  qstat;
+    server_state_data parse;
+    server_query_status qstat;
+
+    network_ssl_connection_t* ssl;
 
 } network_socket;
-
 
 NETWORK_API network_socket *network_socket_new(void);
 NETWORK_API void network_socket_free(network_socket *s);
@@ -195,7 +200,6 @@ NETWORK_API network_socket_retval_t network_socket_connect(network_socket *con);
 NETWORK_API network_socket_retval_t network_socket_connect_finish(network_socket *sock);
 NETWORK_API network_socket_retval_t network_socket_bind(network_socket *con);
 NETWORK_API network_socket *network_socket_accept(network_socket *srv, int *reason);
-NETWORK_API network_socket_retval_t network_socket_set_send_buffer_size(network_socket *sock, int size); 
+NETWORK_API network_socket_retval_t network_socket_set_send_buffer_size(network_socket *sock, int size);
 
 #endif
-

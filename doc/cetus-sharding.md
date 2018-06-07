@@ -10,7 +10,7 @@ Cetus sharding版支持对后端的数据库进行分库，可以根据hash/rang
 
 **1.MySQL**
 
-- 5.7.16以上版本（分布式事务功能需要）
+- 5.7.17以上版本（分布式事务功能需要）
 
 - 数据库设计（即分库，根据业务将数据对象分成若干组）
 
@@ -20,7 +20,7 @@ Cetus sharding版支持对后端的数据库进行分库，可以根据hash/rang
 
 **2.Cetus**
 
-- 根据MySQL后端信息配置users.json、sharding.json和shard.conf（variables.json可选配），具体配置说明详见[Cetus 配置文件说明](https://github.com/Lede-Inc/cetus/blob/master/doc/cetus-profile.md)
+- 根据MySQL后端信息配置users.json、sharding.json和shard.conf（variables.json可选配），具体配置说明详见[Cetus 分库(sharding)配置文件说明](https://github.com/Lede-Inc/cetus/blob/master/doc/cetus-shard-profile.md)
 
 **3.LVS & keepalived**
 
@@ -84,7 +84,11 @@ bin/cetus --defaults-file=conf/shard.conf [--conf-dir＝/home/user/cetus_install
 
   Public表，即全局表，具有相同VDB的存储节点公共表数据是一致的，即都是全量数据，但不同VDB的存储节点公共表是不同的，如果想具有相同公共表，需要前端再处理，例如配置表conf，VDB1和VDB2都需要，需要前端应用分别写入VDB1、VDB2。
 
-**6.VDB**
+**6.单点全局表**
+
+  Single表，即单点全局表，如果表的写操作频繁，且不合适做分片，也不需要跟其他分片表或单点全局表关联，可以把这种类型的表定义为单点全局表。单点全局表数据放在用户指定的唯一一个后端节点，只涉及单点全局表的写操作是单机事务，不会开启分布式事务，减少了事务的代价；缺点是单点全局表只能跟全局表做join关联。
+
+**7.VDB**
 
   VDB（Virtual DataBase）非物理DB，即逻辑DB，主要对应分片表，表现在业务数据层，即代表此VDB内的数据有相同属性值，可以根据此属性值，进行数据的进一步拆分，从而构成分片表，例如订单数据和用户数据属于同一个VDB，可以根据用户ID进行分片，而仓储和商品可以放入另一个VDB。不同VDB之间的数据不能进行关联查询，只有在同一个VDB内才支持。
 
@@ -169,7 +173,7 @@ Cetus内置监控功能，可通过配置选择开启或关闭。开启后Cetus�
 支持利用域名连接数据库后端，Cetus设有相关的启动配置选项disable-dns-cache，选择是否开启解析连接到后端的域名功能，开启后可以通过设置域名并利用域名访问后端。
 
 ### 9.insert批量操作
-支持在insert语句中写多个value，value之间用","隔开，前面的insert语句可省略，例如：
+支持在insert语句中写多个value，value之间用","隔开，例如：
 INSERT INTO table (field1,field2,field3) VALUES ('a',"b","c"), ('a',"b","c"),('a',"b","c");
 
 ## 注意事项
@@ -220,7 +224,7 @@ INSERT INTO table (field1,field2,field3) VALUES ('a',"b","c"), ('a',"b","c"),('a
 
 1. 在Select语句中尽量为表达式列或函数计算列添加别名，比如“select count(\*) rowcnt from ...”，以利于提高SQL解释器的分析水平。 
 2. Sql文本要简洁，针对sharding表，如果有条件，请务必加sharding key做为过滤条件。
-3. 开启事务请使用start transaction。
+3. 开启事务推荐使用start transaction。
 4. 少用子查询这种写法，必须用的话，可以用关联查询语法进行替换。
 5. Update/delete操作要根据sharding key进行过滤后操作（仅针对分片表）。
 6. For update语句不建议使用，锁开销严重，建议在应用端处理该业务逻辑，比如引入分布式锁或者先分配给redis等等。
@@ -263,7 +267,7 @@ Cetus sharding版能支持大多数的SQL语句，目前限制支持的功能有
 
 **1.ORDER BY的限制**
 
-  针对全局表没限制；针对分片表，排序字段不超过8个列，ORDER BY需要使用列名或者别名，目前暂且不支持使用数字。
+  针对全局表没限制；针对分片表，排序字段不超过8个列，ORDER BY需要使用列名或者别名，目前暂且不支持使用数字，ORDER BY目前不支持字段为枚举类型的排序。
 
 **2.DISTINCT的限制**
 
@@ -302,7 +306,7 @@ Cetus sharding版能支持大多数的SQL语句，目前限制支持的功能有
 
 ### 12.事务处理限制
 
-跨库事务的有限支持，针对同一分区键分布的事务，我们默认通过分布式事务方式执行，如果需要考虑性能，可以考虑在所有数据操作都在同一分区时，手动通过注释制定走单机事务提交。 
+跨库事务的有限支持，针对同一分区键分布的事务，我们默认通过分布式事务方式执行，如果需要考虑性能，可以考虑在所有数据操作都在同一分区时，手动通过注释走单机事务提交。 
 
 不跨分区的事务需要在第一条语句中引用分区键，方便Cetus进行SQL转发和路由，并使用单机事务提升效率。
 
@@ -313,7 +317,7 @@ Cetus sharding版能支持大多数的SQL语句，目前限制支持的功能有
 DML语句的限制：Update/Delete 支持子查询，但子查询中不要有嵌套（仅针对分片表）；不支持对 sharding key 列进行 update（仅针对分片表）；Insert 使用时要写全列名，例如：insert into a(col1,col2) values(xx,xx)；Insert 不支持子查询,如有特殊业务需要用到,可以使用注释（仅针对分片表，详见注释功能）；Insert 支持多 value 语句，例如：insert into a(col1,col2) values(x,x),(xx,xx)；支持 replace into/insert on duplicate key 语法。
 
 
-### 13.分区键的数值类型
+### 13.分区键的类型
 
 用于分区的列，可以是“int”或“char”类型，“int”对应到MySQL中各种整数类型，“char”对应到各种定长和变长字符串类型，日期类型在SQL中按字符串处理的话可以支持。 后续会支持特定格式的字符型表示的时间类型,如“YYYY－MM－DD” 和 “YYYY－MM－DD HH24:MI:SS” 格式，时间格式不支持针对时区进行转换，统一使用本地时间。
 

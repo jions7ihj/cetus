@@ -9,9 +9,10 @@
 - glib2-devel
 - flex
 - libevent-devel
-- mysqldb-devel／mariadb-devel
+- mysql-devel／mariadb-devel
+- gperftools-libs (由于malloc存在着潜在的内存碎片问题，建议采用gperftools-libs中的tcmalloc)
 
-请确保在编译安装Cetus前已安装好相应的依赖。
+centos系统可使用：yum install cmake gcc glib2-devel flex libevent-devel mysql-devel gperftools-libs -y 安装依赖包，请确保在编译安装Cetus前已安装好相应的依赖。
 
 ## 安装步骤
 
@@ -27,10 +28,15 @@ cd build/
 - 编译：利用cmake进行编译，指令如下
 
 ```
-cmake ../ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=/home/user/cetus_install [-DSIMPLE_PARSER=ON]
+读写分离版本：
+cmake ../ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=/home/user/cetus_install -DSIMPLE_PARSER=ON
+
+分库版本：
+cmake ../ -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=/home/user/cetus_install -DSIMPLE_PARSER=OFF
+
 ```
 
-其中CMAKE_BUILD_TYPE变量可以选择生成 debug 版和或release 版的程序，CMAKE_INSTALL_PREFIX变量确定软件的实际安装目录的绝对路径；SIMPLE_PARSER变量是可选项，添加则编译读写分离版本，否则编译分库版本。
+其中CMAKE_BUILD_TYPE变量可以选择生成 debug 版和或release 版的程序，CMAKE_INSTALL_PREFIX变量确定软件的实际安装目录的绝对路径；SIMPLE_PARSER变量确定软件的编译版本，设置为ON则编译读写分离版本，否则编译分库版本。
 
 该过程会检查您的系统是否缺少一些依赖库和依赖软件，可以根据错误代码安装相应依赖。
 
@@ -54,14 +60,19 @@ vi XXX.conf
 
 根据具体编译安装的版本编辑相关配置文件，若使用读写分离功能则需配置users.json和proxy.conf，若使用sharding功能则需配置users.json、sharding.json和shard.conf，其中两个版本的variables.json均可选配。
 
-配置文件的具体说明见[Cetus 配置文件说明](https://github.com/Lede-Inc/cetus/blob/master/doc/cetus-profile.md)。
+配置文件的具体说明见[Cetus 读写分离版配置文件说明](https://github.com/Lede-Inc/cetus/blob/master/doc/cetus-rw-profile.md)和[Cetus 分库(sharding)版配置文件说明](https://github.com/Lede-Inc/cetus/blob/master/doc/cetus-shard-profile.md)。
 
 - 启动：Cetus可以利用bin/cetus启动
 
 ```
-bin/cetus --defaults-file=conf/XXX.conf [--conf-dir＝/home/user/cetus_install/conf/]
+读写分离版本：
+bin/cetus --defaults-file=conf/proxy.conf [--conf-dir＝/home/user/cetus_install/conf/]
+
+分库版本：
+bin/cetus --defaults-file=conf/shard.conf [--conf-dir＝/home/user/cetus_install/conf/]
+
 ```
 
-其中Cetus启动时可以添加命令行选项，--defaults-file选项用来加载启动配置文件，且在启动前保证启动配置文件的权限为660；--conf-dir是可选项，用来加载其他配置文件(.json文件)，默认为当前目录下conf文件夹。
+其中Cetus启动时可以添加命令行选项，--defaults-file选项用来加载启动配置文件（proxy.conf或者shard.conf），且在启动前保证启动配置文件的权限为660；--conf-dir是可选项，用来加载其他配置文件(.json文件)，默认为当前目录下conf文件夹。
 
 Cetus可起动守护进程后台运行，也可在进程意外终止自动启动一个新进程，可通过启动配置选项进行设置。
