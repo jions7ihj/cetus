@@ -88,6 +88,12 @@ struct transact_feature_t {
     int isolation_level;
 };
 
+struct idlist_opt_t {
+  sql_id_list_t* list;
+  const char* span_start;
+  const char* span_end;
+};
+
 } // end %include
 
 // Input is a single SQL command
@@ -330,6 +336,10 @@ cmd ::= ROLLBACK trans_opt TO savepoint_opt nm(X). {
     }
     return expr;
   }
+
+#define IS_PARSING_SELECT() (context->parsing_place >= SELECT_OPTION \
+               && context->parsing_place < SELECT_DONE)
+
 }
 
 // Define operator precedence early so that this is the first occurrence
@@ -467,9 +477,9 @@ oneselect(A) ::= SELECT select_options(D) selcollist(C) from(F) where_opt(W)
     A->limit = L.pLimit;
     A->offset = L.pOffset;
     A->lock_read = R;
+    context->parsing_place = SELECT_DONE;
+    context->is_parsing_subquery = 0; //since there are no nested subquery, good to set 0
 }
-
-oneselect(A) ::= values(A).
 
 %type values {sql_select_t*}
 %destructor values { sql_select_free($$); }
@@ -497,11 +507,17 @@ values(A) ::= values(A) COMMA LP exprlist(Y) RP. {
 %type select_option {int}
 select_options(A) ::= . {
     A = 0;
+    if (!context->allow_subquery_nesting && context->is_parsing_subquery) {
+      sql_context_set_error(context, PARSE_NOT_SUPPORT,
+           "(cetus) subquery nesting level too deep (1-level most)");
+    }
+    if (IS_PARSING_SELECT()) {
+      context->is_parsing_subquery = 1;
+    }
     context->parsing_place = SELECT_COLUMN;
 }
 select_options(A) ::= select_options(X) select_option(Y). {
     A = X|Y;
-    context->parsing_place = SELECT_COLUMN;
 }
 select_option(A) ::= DISTINCT.   {A = SF_DISTINCT;}
 select_option(A) ::= ALL. {A = SF_ALL;}
@@ -565,8 +581,14 @@ as(X) ::= .            {X.z = 0; X.n = 0;}
 
 // A complete FROM clause.
 //
-from(A) ::= . { A = 0; }
-from(A) ::= FROM seltablist(X). { A = X; }
+from(A) ::= . {
+  A = 0;
+  context->parsing_place = SELECT_WHERE;
+}
+from(A) ::= FROM seltablist(X). {
+  A = X;
+  context->parsing_place = SELECT_WHERE;
+}
 
 // "seltablist" is a "Select Table List" - the content of the FROM clause
 // in a SELECT statement.  "stl_prefix" is a prefix of this list.
@@ -821,11 +843,24 @@ index_list ::= ID|PRIMARY.
 
 ////////////////////////// The INSERT command /////////////////////////////////
 //
+insert_stmt ::= insert_cmd(R) INTO fullname(X) idlist_opt(F) values(S) opt_insert_update_list(U). {
+  sql_insert_t* p = sql_insert_new();
+  p->is_replace = R;
+  p->table = X;
+  p->columns = F.list;
+  p->columns_start = F.span_start;
+  p->columns_end = F.span_end;
+  p->sel_val = S;
+  p->update_list = U;
+  sql_insert(context, p);
+}
 insert_stmt ::= insert_cmd(R) INTO fullname(X) idlist_opt(F) select(S). {
   sql_insert_t* p = sql_insert_new();
   p->is_replace = R;
   p->table = X;
-  p->columns = F;
+  p->columns = F.list;
+  p->columns_start = F.span_start;
+  p->columns_end = F.span_end;
   p->sel_val = S;
   sql_insert(context, p);
 }
@@ -833,32 +868,36 @@ insert_stmt ::= insert_cmd(R) INTO fullname(X) idlist_opt(F) DEFAULT VALUES. {
   sql_insert_t* p = sql_insert_new();
   p->is_replace = R;
   p->table = X;
-  p->columns = F;
+  p->columns = F.list;
+  p->columns_start = F.span_start;
+  p->columns_end = F.span_end;
   p->sel_val = 0;
   sql_insert(context, p);
 }
-insert_stmt ::= insert_cmd(R) INTO fullname(X) idlist_opt(F) values(S)
-        ON DUPLICATE KEY UPDATE exprlist. {
-  sql_insert_t* p = sql_insert_new();
-  p->is_replace = R;
-  p->table = X;
-  p->columns = F;
-  p->sel_val = S;
-  sql_insert(context, p);
-}
+%type opt_insert_update_list {sql_expr_list_t*}
+%destructor opt_insert_update_list {sql_expr_list_free($$);}
+opt_insert_update_list(A) ::= . { A = NULL; }
+opt_insert_update_list(A) ::= ON DUPLICATE KEY UPDATE update_list(X). { A = X; }
 
 %type insert_cmd {int}
 insert_cmd(A) ::= INSERT. {A=0;}
 insert_cmd(A) ::= REPLACE.  {A = 1;}
 insert_cmd(A) ::= INSERT IGNORE. {A=1;}
 
-%type idlist_opt {sql_id_list_t*}
-%destructor idlist_opt {sql_id_list_free($$);}
+%type idlist_opt {struct idlist_opt_t}
+%destructor idlist_opt {sql_id_list_free($$.list);}
 %type idlist {sql_id_list_t*}
 %destructor idlist {sql_id_list_free($$);}
 
-idlist_opt(A) ::= .                   {A = 0;}
-idlist_opt(A) ::= LP idlist(X) RP.    {A = X;}
+idlist_opt(A) ::= . {
+  A.list = 0;
+  A.span_start = A.span_end = 0;
+}
+idlist_opt(A) ::= LP(U) idlist(X) RP(V).    {
+  A.list = X;
+  A.span_start = U.z;
+  A.span_end = V.z + V.n;
+}
 idlist(A) ::= idlist(A) COMMA nm(Y).
     {A = sql_id_list_append(A,&Y);}
 idlist(A) ::= nm(Y).
@@ -974,6 +1013,10 @@ func_expr(A) ::= JOIN_KW(N) LP expr(X) COMMA expr(Y) RP(R). {
     sql_expr_list_append(args, Y);
     A = function_expr_new(&N, args, &R);
 }
+func_expr(A) ::= VALUES(N) LP simple_ident_nospvar(X) RP(R). {
+    sql_expr_list_t *args = sql_expr_list_append(0, X);
+    A = function_expr_new(&N, args, &R);
+}
 func_expr(A) ::= INSERT(N) LP expr(X) COMMA expr(Y) COMMA expr(Z) COMMA expr(W) RP(R). {
     sql_expr_list_t *args = sql_expr_list_append(0, X);
     sql_expr_list_append(args, Y);
@@ -981,19 +1024,20 @@ func_expr(A) ::= INSERT(N) LP expr(X) COMMA expr(Y) COMMA expr(Z) COMMA expr(W) 
     sql_expr_list_append(args, W);
     A = function_expr_new(&N, args, &R);
 }
-func_expr(A) ::= TRIM(N) LP expr RP(R). {
+// TRIM, POSITION includes LP in itself, hack for special function
+func_expr(A) ::= TRIM(N) expr RP(R). {
     A = function_expr_new(&N, 0, &R);
 }
-func_expr(A) ::= TRIM(N) LP expr FROM expr RP(R). {
+func_expr(A) ::= TRIM(N) expr FROM expr RP(R). {
     A = function_expr_new(&N, 0, &R);
 }
-func_expr(A) ::= TRIM(N) LP TRIM_SPEC expr FROM expr RP(R). {
+func_expr(A) ::= TRIM(N) TRIM_SPEC expr FROM expr RP(R). {
     A = function_expr_new(&N, 0, &R);
 }
-func_expr(A) ::= TRIM(N) LP TRIM_SPEC FROM expr RP(R). {
+func_expr(A) ::= TRIM(N) TRIM_SPEC FROM expr RP(R). {
     A = function_expr_new(&N, 0, &R);
 }
-func_expr(A) ::= POSITION(N) LP STRING IN expr RP(R). {
+func_expr(A) ::= POSITION(N) STRING IN expr RP(R). {
     A = function_expr_new(&N, 0, &R);
 }
 func_expr(A) ::= CURRENT_DATE(N) opt_parentheses. {

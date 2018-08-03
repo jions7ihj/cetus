@@ -1550,6 +1550,12 @@ cetus_result_find_fielddef(cetus_result_t *res, const char *table, const char *f
 static gboolean
 cetus_result_parse_fielddefs(cetus_result_t *res_merge, GQueue *input)
 {
+    if (res_merge->field_count >= input->length) {
+        g_critical("%s: res_merge->field_count:%d, queue length:%d",
+                G_STRLOC, res_merge->field_count, input->length);
+        return FALSE;
+    }
+
     network_packet packet = { 0 };
 
     res_merge->fielddefs = network_mysqld_proto_fielddefs_new();
@@ -3007,6 +3013,9 @@ check_fail_met(sql_context_t *context, network_queue *send_queue, GPtrArray *rec
                 server_session_t *ss = g_ptr_array_index(con->servers, p);
                 if (pkt_type == MYSQLD_PACKET_ERR) {
                     g_warning("%s: failed query:%s, server:%s", G_STRLOC, orig_sql, ss->server->dst->name->str);
+                    if (con->num_pending_servers > 0) {
+                        con->server_to_be_closed = 1;
+                    }
                 }
                 if (context->stmt_type == STMT_CALL) {
                     if (!(*call_fail_met)) {

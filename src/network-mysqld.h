@@ -520,6 +520,7 @@ struct network_mysqld_con {
     unsigned int is_start_tran_command:1;
     unsigned int is_prepared:1;
     unsigned int is_in_transaction:1;
+    unsigned int xa_tran_conflict:1;
     unsigned int is_timeout:1;
     unsigned int is_in_sess_context:1;
     unsigned int is_changed_user_when_quit:1;
@@ -563,6 +564,7 @@ struct network_mysqld_con {
     unsigned int last_record_updated:1;
     unsigned int query_cache_judged:1;
     unsigned int is_client_compressed:1;
+    unsigned int is_admin_client:1;
     unsigned int is_client_to_be_closed:1;
     unsigned int last_backend_type:2;
     unsigned int all_participate_num:8;
@@ -729,11 +731,6 @@ NETWORK_API void network_mysqld_con_reset_command_response_state(network_mysqld_
 NETWORK_API void network_mysqld_con_reset_query_state(network_mysqld_con *con);
 
 /**
- * set groups, delete if already exists
- */
-void network_mysqld_con_set_sharding_plan(network_mysqld_con *con, struct sharding_plan_t *);
-
-/**
  * should be socket 
  */
 NETWORK_API network_socket_retval_t network_mysqld_read(chassis *srv, network_socket *con);
@@ -765,12 +762,14 @@ NETWORK_API int network_mysqld_queue_reset(network_socket *sock);
 
 NETWORK_API void network_connection_pool_create_conn(network_mysqld_con *con);
 NETWORK_API void network_connection_pool_create_conns(chassis *srv);
+NETWORK_API void check_and_create_conns_func(int fd, short what, void *arg);
+NETWORK_API void update_time_func(int fd, short what, void *arg);
 
 NETWORK_API void record_xa_log_for_mending(network_mysqld_con *con, network_socket *sock);
 NETWORK_API gboolean shard_set_autocommit(network_mysqld_con *con);
 NETWORK_API gboolean shard_set_charset_consistant(network_mysqld_con *con);
 NETWORK_API gboolean shard_set_default_db_consistant(network_mysqld_con *con);
 NETWORK_API gboolean shard_set_multi_stmt_consistant(network_mysqld_con *con);
-NETWORK_API void shard_build_xa_query(network_mysqld_con *con, server_session_t *ss);
+NETWORK_API int shard_build_xa_query(network_mysqld_con *con, server_session_t *ss);
 
 #endif

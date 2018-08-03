@@ -230,8 +230,10 @@ group_replication_detect(network_backends_t *bs, cetus_monitor_t *monitor)
 
         if(old_master[0] != '\0' && strcasecmp(old_master, master_addr) != 0) {
             g_warning("exists more than one masters.");
+            mysql_free_result(rs_set);
             return ;
         } else if (old_master[0] != '\0' && strcasecmp(old_master, master_addr) == 0) {
+            mysql_free_result(rs_set);
             continue;
         }
 
@@ -579,7 +581,7 @@ check_slave_timestamp(int fd, short what, void *arg)
                 gettimeofday(&tv, NULL);
                 double ts_now = tv.tv_sec + ((double)tv.tv_usec) / 1000000;
                 delay_secs = ts_now - ts_slave;
-                backend->slave_delay_msec = (int)delay_secs *1000;
+                backend->slave_delay_msec = (int)(delay_secs *1000);
             } else {
                 backend->slave_delay_msec = G_MAXINT32;
             }
@@ -734,6 +736,7 @@ cetus_monitor_start_thread(cetus_monitor_t *monitor, chassis *chas)
     new_thread = g_thread_create(cetus_monitor_mainloop, monitor, TRUE, &error);
     if (new_thread == NULL && error != NULL) {
         g_critical("Create thread error: %s", error->message);
+        g_clear_error(&error);
     }
 #else
     new_thread = g_thread_new("monitor-thread", cetus_monitor_mainloop, monitor);

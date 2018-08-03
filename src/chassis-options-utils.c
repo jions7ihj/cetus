@@ -422,6 +422,9 @@ assign_default_pool_size(const gchar *newval, gpointer param) {
             gint value = 0;
                 if (try_get_int_value(newval, &value)) {
                     if (value >= 0) {
+                        if (value < 10) {
+                            value = 10;
+                        }
                         srv->mid_idle_connections = value;
                         ret = ASSIGN_OK;
                     } else {
@@ -551,8 +554,8 @@ assign_max_alive_time(const gchar *newval, gpointer param) {
             gint value = 0;
             if (try_get_int_value(newval, &value)) {
                 if (value >= 0) {
-                    if (value < 600) {
-                        value = 600;
+                    if (value < 60) {
+                        value = 60;
                     }
                     srv->max_alive_time = value;
                     ret = ASSIGN_OK;
@@ -721,7 +724,7 @@ show_check_slave_delay(gpointer param) {
         return g_strdup_printf("%s", srv->check_slave_delay ? "true" : "false");
     }
     if (CAN_SAVE_OPTS_PROPERTY(opt_type)) {
-        return srv->check_slave_delay ? g_strdup("true") : NULL;
+        return (srv->check_slave_delay == 0) ? g_strdup("false") : NULL;
     }
     return NULL;
 }
@@ -859,12 +862,55 @@ assign_default_query_cache_timeout(const gchar *newval, gpointer param) {
 }
 
 gchar*
+show_default_maintained_client_idle_timeout(gpointer param) {
+    struct external_param *opt_param = (struct external_param *)param;
+    chassis *srv = opt_param->chas;
+    gint opt_type = opt_param->opt_type;
+    if (CAN_SHOW_OPTS_PROPERTY(opt_type)) {
+        return g_strdup_printf("%d (s)", srv->maintained_client_idle_timeout);
+    }
+    if (CAN_SAVE_OPTS_PROPERTY(opt_type)) {
+        if (srv->maintained_client_idle_timeout == 30) {
+            return NULL;
+        }
+        return g_strdup_printf("%d", srv->maintained_client_idle_timeout);
+    }
+    return NULL;
+}
+
+gint
+assign_default_maintained_client_idle_timeout(const gchar *newval, gpointer param) {
+    gint ret = ASSIGN_ERROR;
+    struct external_param *opt_param = (struct external_param *)param;
+    chassis *srv = opt_param->chas;
+    gint opt_type = opt_param->opt_type;
+    if (CAN_ASSIGN_OPTS_PROPERTY(opt_type)) {
+        if (NULL != newval) {
+            int value = 0;
+            if (try_get_int_value(newval, &value)) {
+                if (value >= 0) {
+                    srv->maintained_client_idle_timeout = value;
+                    ret = ASSIGN_OK;
+                } else {
+                    ret = ASSIGN_VALUE_INVALID;
+                }
+            } else {
+                ret = ASSIGN_VALUE_INVALID;
+            }
+        } else {
+            ret = ASSIGN_VALUE_INVALID;
+        }
+    }
+    return ret;
+}
+
+gchar*
 show_default_client_idle_timeout(gpointer param) {
     struct external_param *opt_param = (struct external_param *)param;
     chassis *srv = opt_param->chas;
     gint opt_type = opt_param->opt_type;
     if (CAN_SHOW_OPTS_PROPERTY(opt_type)) {
-        return g_strdup_printf("%d (ms)", srv->client_idle_timeout);
+        return g_strdup_printf("%d (s)", srv->client_idle_timeout);
     }
     if (CAN_SAVE_OPTS_PROPERTY(opt_type)) {
         if (srv->client_idle_timeout == 8 * HOURS) {

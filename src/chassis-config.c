@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <glib/gstdio.h>        /* for g_stat */
 
 enum chassis_config_type_t {
@@ -320,15 +321,18 @@ chassis_config_load_options_mysql(chassis_config_t *conf)
     return FALSE;
 }
 
-static gboolean
-chassis_config_load_options(chassis_config_t *conf)
+gint chassis_config_reload_options(chassis_config_t *conf)
 {
     switch (conf->type) {
     case CHASSIS_CONF_MYSQL:
-        return chassis_config_load_options_mysql(conf);
+        if(chassis_config_load_options_mysql(conf)) {
+            return 0;
+        } else {
+            return -1;
+        }
     default:
         /* TODO g_critical(G_STRLOC " not implemented"); */
-        return FALSE;
+        return -2;
     }
 }
 
@@ -336,7 +340,7 @@ GHashTable *
 chassis_config_get_options(chassis_config_t *conf)
 {
     if (!conf->options)
-        chassis_config_load_options(conf);
+        chassis_config_reload_options(conf);
     return conf->options;
 }
 
@@ -346,7 +350,11 @@ chassis_config_object_set_cache(struct config_object_t *ob, const char *str, tim
     if (ob->cache) {
         g_free(ob->cache);
     }
-    ob->cache = g_strdup(str);
+    if (str) {
+        ob->cache = g_strdup(str);
+    } else {
+        ob->cache = NULL;
+    }
     ob->mtime = mt;
 }
 
@@ -419,10 +427,13 @@ chassis_config_local_query_object(chassis_config_t *conf,
     snprintf(basename, sizeof(basename), "%s.%s", name, "json");
     char *object_file = g_build_filename(conf->schema, basename, NULL);
     char *buffer = NULL;
-
-    if (read_file_to_buffer(object_file, &buffer) == FALSE) {
+    GError *err = NULL;
+    if (!g_file_get_contents(object_file, &buffer, NULL, &err)) {
+        if (!g_error_matches(err, G_FILE_ERROR, G_FILE_ERROR_NOENT)) {
+            g_critical(G_STRLOC " %s", err->message);
+        }
+        g_clear_error(&err);
         g_free(object_file);
-        g_free(buffer);
         return FALSE;
     }
 
@@ -546,6 +557,16 @@ chassis_config_parse_options(chassis_config_t *conf, GList *entries)
         if (entry_value) {
             switch (entry->arg) {
             case OPTION_ARG_NONE:
+                if (entry->arg_data == NULL)
+                    break;
+                if (strcasecmp(entry_value, "false")==0 || strncmp(entry_value, "0", 1)==0) {
+                    *(int *)(entry->arg_data) = 0;
+                } else if (strcasecmp(entry_value, "true")==0 || isdigit(entry_value[0])) {
+                    *(int *)(entry->arg_data) = 1;
+                } else {
+                    g_warning("error boolean value: %s", entry_value);
+                }
+                break;
             case OPTION_ARG_INT:
                 if (entry->arg_data == NULL)
                     break;
@@ -639,10 +660,8 @@ chassis_config_update_object_cache(chassis_config_t *conf, const char *name)
     struct config_object_t *object = chassis_config_get_object(conf, name);
     if (!object)
         return;
-    if (object->cache) {
-        g_free(object->cache);
-        object->cache = NULL;
-    }
+    time_t now = time(0);
+    chassis_config_object_set_cache(object, NULL, now);
     char *str;
     chassis_config_query_object(conf, name, &str);
     if (str) {                  /* we just want to trigger query&caching, result is not needed */

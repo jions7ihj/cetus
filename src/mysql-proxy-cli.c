@@ -111,6 +111,7 @@ struct chassis_frontend_t {
     int cetus_max_allowed_packet;
     int default_query_cache_timeout;
     int client_idle_timeout;
+    int maintained_client_idle_timeout;
     int query_cache_enabled;
     int disable_dns_cache;
     double slave_delay_down_threshold_sec;
@@ -164,16 +165,18 @@ chassis_frontend_new(void)
     frontend->is_client_compress_support = 0;
     frontend->xa_log_detailed = 0;
 
-    frontend->default_pool_size = 100;
+    frontend->default_pool_size = 10;
     frontend->max_resp_len = 10 * 1024 * 1024;  /* 10M */
     frontend->max_alive_time = DEFAULT_LIVE_TIME;
     frontend->merged_output_size = 8192;
     frontend->max_header_size = 65536;
     frontend->config_port = 3306;
 
-    frontend->slave_delay_down_threshold_sec = 60.0;
+    frontend->check_slave_delay = 1;
+    frontend->slave_delay_down_threshold_sec = 10.0;
     frontend->default_query_cache_timeout = 100;
     frontend->client_idle_timeout = 8 * HOURS;
+    frontend->maintained_client_idle_timeout = 30;
     frontend->long_query_time = MAX_QUERY_TIME;
     frontend->cetus_max_allowed_packet = MAX_ALLOWED_PACKET_DEFAULT;
     frontend->disable_dns_cache = 0;
@@ -406,8 +409,15 @@ chassis_frontend_set_chassis_options(struct chassis_frontend_t *frontend, chassi
     chassis_options_add(opts,
                         "default-client-idle-timeout",
                         0, 0, OPTION_ARG_INT, &(frontend->client_idle_timeout),
-                        "default client idle timeout in seconds", "<integer>",
+                        "set client idle timeout in seconds(default 28800 seconds)", "<integer>",
                         assign_default_client_idle_timeout, show_default_client_idle_timeout, ALL_OPTS_PROPERTY);
+
+    chassis_options_add(opts,
+                        "default-maintained-client-idle-timeout",
+                        0, 0, OPTION_ARG_INT, &(frontend->maintained_client_idle_timeout),
+                        "set maintained client idle timeout in seconds(default 30 seconds)", "<integer>",
+                        assign_default_maintained_client_idle_timeout, 
+                        show_default_maintained_client_idle_timeout, ALL_OPTS_PROPERTY);
 
     chassis_options_add(opts,
                         "long-query-time",
@@ -547,6 +557,9 @@ init_parameters(struct chassis_frontend_t *frontend, chassis *srv)
     srv->default_charset = DUP_STRING(frontend->default_charset, NULL);
     srv->default_db = DUP_STRING(frontend->default_db, NULL);
 
+    if (frontend->default_pool_size < 10) {
+        frontend->default_pool_size = 10;
+    }
     srv->mid_idle_connections = frontend->default_pool_size;
     g_message("set default pool size:%d", srv->mid_idle_connections);
 
@@ -561,8 +574,8 @@ init_parameters(struct chassis_frontend_t *frontend, chassis *srv)
     g_message("set max resp len:%d", srv->max_resp_len);
 
     srv->current_time = time(0);
-    if (frontend->max_alive_time < 600) {
-        frontend->max_alive_time = 600;
+    if (frontend->max_alive_time < 60) {
+        frontend->max_alive_time = 60;
     }
     srv->max_alive_time = frontend->max_alive_time;
     g_message("set max alive time:%d", srv->max_alive_time);
@@ -612,11 +625,12 @@ init_parameters(struct chassis_frontend_t *frontend, chassis *srv)
             g_warning("Set slave-delay-recover=%.3f", srv->slave_delay_down_threshold_sec);
         }
     } else {
-        srv->slave_delay_recover_threshold_sec = srv->slave_delay_down_threshold_sec / 2;
+        srv->slave_delay_recover_threshold_sec = 1.0;
     }
 
     srv->default_query_cache_timeout = MAX(frontend->default_query_cache_timeout, 1);
-    srv->client_idle_timeout = MAX(frontend->client_idle_timeout, 1);
+    srv->client_idle_timeout = MAX(frontend->client_idle_timeout, 10);
+    srv->maintained_client_idle_timeout = MAX(frontend->maintained_client_idle_timeout, 10);
     srv->long_query_time = MIN(frontend->long_query_time, MAX_QUERY_TIME);
     srv->cetus_max_allowed_packet = CLAMP(frontend->cetus_max_allowed_packet,
                                           MAX_ALLOWED_PACKET_FLOOR, MAX_ALLOWED_PACKET_CEIL);
